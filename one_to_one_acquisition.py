@@ -1,5 +1,6 @@
 """
-	Latency recording script for AnalogDiscovery2
+	Latency recording script for one-to-one WSN
+	interfaces with AnalogDiscovery2 to trigger button press and read mote pins.
 
 	User inputs:
 		1. Number of networks
