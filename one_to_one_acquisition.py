@@ -19,9 +19,7 @@ from dwfconstants import *
 import sys
 import time
 
-
 dwf = None
-
 # list of networks
 list_of_networks = []
 
@@ -30,9 +28,6 @@ class Network:
 	input_channels = []
 	num_packets = 0
 
-	output_channels_bit_rep = 0
-	input_channels_bit_rep = 0
-
 	def __init__(self, output_channels, input_channels, num_packets_to_send):
 		self.output_channels = output_channels
 		self.input_channels = input_channels
@@ -40,15 +35,38 @@ class Network:
 
 class AnalogDiscoveryUtils:
 
-	def __init__(self):
+	def __init__(self, sampling_freq_user_input):
 		self.interface_handler = None
-		self.internal_digital_in_clock_freq = None
-		self.max_buffer_size_in = c_int()
+
+		self.internal_clock_freq = 0
+		self.sampling_freq = sampling_freq_user_input
+		self.period_ms = (1000.0 / self.sampling_freq)
+
+		self.num_packets_experiment = -1
 
 		# bit representations of the AD2 DIO channels
 		# index is 1 if that pin is included in input/output
-		self.input_channels_bit_rep = 0
-		self.output_channels_bit_rep = 0
+		self.input_channels_bit_rep = -1
+		self.output_channels_bit_rep = -1
+
+		# relevant bits of AD output
+		self.button_press_pos = -1
+		self.button_press_bit = -1
+
+		#relevant bits and bit positions of AD inputs
+		# note that button_press_mirror_bit is an AD input while button_press_bit is an AD output
+		self.button_press_mirror_pos = -1
+		self.button_press_mirror_bit = -1
+
+		self.packet_created_pos = -1
+		self.packet_created_bit = -1
+
+		self.packet_received_pos = -1
+		self.packet_received_bit = -1
+
+		# when post-processing we only care about changes to these bits
+		self.bits_to_monitor = -1
+		self.num_channels_to_monitor = -1
 
 		# boolean that keeps track of AD2's DIO interface with network
 		self.network_added = False
@@ -62,7 +80,7 @@ class AnalogDiscoveryUtils:
 		# declare ctype variables
 		hdwf = c_int()
 
-		print "\nOpening first device"
+		print "\nOpening device"
 		dwf.FDwfDeviceOpen(c_int(-1), byref(hdwf))
 
 		if hdwf.value == 0:
@@ -72,13 +90,15 @@ class AnalogDiscoveryUtils:
 		self.interface_handler = hdwf
 
 		hzSysIn = c_double()
+		#max_buffer_size_in = c_int()
 
 		dwf.FDwfDigitalInInternalClockInfo(self.interface_handler, byref(hzSysIn))
-		dwf.FDwfDigitalInBufferSizeInfo(self.interface_handler, byref(self.max_buffer_size_in))
-		self.internal_digital_in_clock_freq = hzSysIn
+		#dwf.FDwfDigitalInBufferSizeInfo(self.interface_handler, byref(max_buffer_size_in))
+
+		self.internal_clock_freq = hzSysIn.value
+
 		#print "internal digital in frequency is " + str(hzSysIn.value)
-		#print "digital in max buffer size: " + str(self.max_buffer_size_in.value)
-		print "\n"
+		#print "digital in max buffer size: " + str(max_buffer_size_in.value)
 
 	def close_device(self):
 		"""Resets instruments and closes the connection to AD2."""
@@ -90,20 +110,50 @@ class AnalogDiscoveryUtils:
 		dwf.FDwfDigitalInReset(ad_utils.interface_handler)
 
 		dwf.FDwfDeviceCloseAll()
-		print "device closed"
+		print "device closed\n"
 
 	def add_network(self, network):
 		"""sets network outputs to be AD2 input channels
 		sets all other AD2 channels to be outputs. 
 		this is done to control AD2 outputs and keep them constant
-		"""
-		for channel in network.output_channels:
-			self.input_channels_bit_rep = self.input_channels_bit_rep | (1<<channel)
+		"""		
+		self.num_packets_experiment = network.num_packets
+
+		# relevant bits of AD output
+		self.button_press_pos = network.input_channels[0]
+		self.button_press_bit = 1 << self.button_press_pos
+
+		#relevant bits and bit positions of AD inputs
+		# note that button_press_mirror_bit is an AD input while button_press_bit is an AD output
+		self.button_press_mirror_pos = network.output_channels[0]
+		self.button_press_mirror_bit = 1 << self.button_press_mirror_pos
+
+		self.packet_created_pos = network.output_channels[1]
+		self.packet_created_bit = 1 << self.packet_created_pos
+
+		self.packet_received_pos = network.output_channels[-1]
+		self.packet_received_bit = 1 << self.packet_received_pos
+
+		# when post-processing we only care about changes to these bits
+		self.bits_to_monitor = self.button_press_mirror_bit | self.packet_created_bit | self.packet_received_bit
+		self.num_channels_to_monitor = len(network.output_channels)
+
+		self.input_channels_bit_rep = self.bits_to_monitor
 
 		# every channel that is not a network input channel is an AD output
 		self.output_channels_bit_rep = ((2 ** 16) - 1) ^ self.input_channels_bit_rep
 
 		self.network_added = True
+
+		print "button_press_bit: {}".format(binary_num_str(self.button_press_bit))
+		print "button_press_mirror_bit: {}".format(binary_num_str(self.button_press_mirror_bit))
+		print "packet_created_bit: {}".format(binary_num_str(self.packet_created_bit))
+		print "packet_received_bit: {}".format(binary_num_str(self.packet_received_bit))
+		print "bits_to_monitor: {}\n".format(binary_num_str(self.bits_to_monitor))
+
+		#print AD2 output and input channels
+		print "AD2 enabled outputs: {}".format(binary_num_str(self.output_channels_bit_rep))
+		print "AD2 inputs: {}\n".format(binary_num_str(self.input_channels_bit_rep))	
 
 	def _get_DIO_values(self, print_vals=False):
 		"""Returns an int containing the DIO channel values.
@@ -134,14 +184,15 @@ class AnalogDiscoveryUtils:
 		#print enabled DIO outputs as bitfield (32 digits, removing 0b at the front)
 		#print "enabled digital output pins:  " + bin(enabled_outputs.value)[2:]
 
-		# set all enabled outputs to zero
-		dwf.FDwfDigitalIOOutputSet(self.interface_handler, c_uint16(0))
+		# set all enabled outputs to 1 except button press bit
+		dwf.FDwfDigitalIOOutputSet(self.interface_handler, c_uint16(~self.button_press_bit))
 
-		print "Configured DigitalIO."
+		#print "Configured DigitalIO."
+		return c_uint16(~self.button_press_bit)
+
 
 	def _configure_DigitalIn(self, num_samples, trigger_channel_bit_rep):
 		"""configure DigitalIn instrument for the experiment.
-		Samples at 1 MHz.
 		Configures the trigger when the channel represented by trigger_channel_bit_rep is high.
 		Configures instrument to take num_samples to take after trigger. 
 
@@ -153,13 +204,10 @@ class AnalogDiscoveryUtils:
 
 		# in record mode samples after trigger are acquired only
 		dwf.FDwfDigitalInAcquisitionModeSet(self.interface_handler, acqmodeRecord)
-		# set clock divider; we want to sample at 100 MHz / 100 = 1 MHz
-		dwf.FDwfDigitalInDividerSet(self.interface_handler, c_int(100))
+		# set clock divider so 100 MHz / self.sampling_freq = divider
+		dwf.FDwfDigitalInDividerSet(self.interface_handler, c_int((int) (100000000 / self.sampling_freq)))
 		# take 16 bits per sample
 		dwf.FDwfDigitalInSampleFormatSet(self.interface_handler, c_int(16))
-
-		# set buffer size as large as we can
-		#dwf.FDwfDigitalInBufferSizeSet(self.interface_handler, self.max_buffer_size_in)
 
 		# take num_samples after trigger
 		dwf.FDwfDigitalInTriggerPositionSet(self.interface_handler, c_int(num_samples))
@@ -168,32 +216,10 @@ class AnalogDiscoveryUtils:
 		# set DigitalIn trigger when trigger_channel_bit_rep is high
 		dwf.FDwfDigitalInTriggerSet(self.interface_handler, c_int(0), c_int(trigger_channel_bit_rep), c_int(0), c_int(0))
 
-		"""
-		#printing miscellaneous trigger info
-		current_trigger_source = c_ubyte()
-		dwf.FDwfDigitalInTriggerSourceGet(self.interface_handler, byref(current_trigger_source))
-		print "Current trigger source: {}\n".format(current_trigger_source)
-
-		trigger_position_configured = c_uint()
-		dwf.FDwfDigitalInTriggerPositionGet(self.interface_handler, trigger_position_configured)
-		print "Configured trigger position: {}\n".format(trigger_position_configured)
-
-		trigger_detector_low = c_uint()
-		trigger_detector_high = c_uint()
-		trigger_detector_rising = c_uint()
-		trigger_detector_falling = c_uint()
-		dwf.FDwfDigitalInTriggerGet(self.interface_handler, byref(trigger_detector_low), byref(trigger_detector_high), 
-			byref(trigger_detector_rising), byref(trigger_detector_falling))
-		print "Configured trigger detector option"
-		print "low: {}".format(trigger_detector_low)
-		print "high: {}".format(trigger_detector_high)
-		print "rising: {}".format(trigger_detector_rising)
-		print "falling: {}\n".format(trigger_detector_falling)
-		"""
-
 		# start acquisition; should wait for trigger
 		dwf.FDwfDigitalInConfigure(self.interface_handler, c_bool(0), c_bool(1))
-		print "Configured DigitalIn."
+
+		#print "Configured DigitalIn."
 
 	def _get_DigitalIn_status(self, read_data=False):
 		"""Returns the c_ubyte() object corresponding to the instrument state.
@@ -205,13 +231,14 @@ class AnalogDiscoveryUtils:
 		dwf.FDwfDigitalInStatus(self.interface_handler, c_int(0), byref(status))
 		return status
 	
-	def _copy_buffer_samples(self, cSamples, nSamples, arr, last_read=False):
+	def _copy_buffer_samples(self, buffer_info, nSamples, arr, last_read=False):
 		"""Copies samples from the AD2 buffer to arr (located on computer memory).
 		Returns the updated cSamples.
 		"""
 		cAvailable = c_int()
 		cLost = c_int()
 		cCorrupted = c_int()
+		cSamples = buffer_info[0]
 
 		# get DigitalIn status because we want to read from buffer
 		self._get_DigitalIn_status(read_data=True)
@@ -229,9 +256,10 @@ class AnalogDiscoveryUtils:
 		if (last_read == False):
 			cSamples += cAvailable.value
 
-		return cSamples
+		buffer_info = [cSamples, buffer_info[1] + cLost.value, buffer_info[2] + cCorrupted.value]
+		return buffer_info
 
-	def run(self, network):
+	def run(self):
 		"""The main function of the experiment.
 		Our test harness consists of two parts:
 			-digital output to trigger openmote pin. the output rising edge is 1 ms after the reception is high
@@ -246,36 +274,24 @@ class AnalogDiscoveryUtils:
 			(Python): increment number of packets sent
 			repeat above steps until number of packets sent = number of packets in experiment
 		"""
+		run_start_timestamp = time.clock()
 		experiment_start_time = time.strftime("%H_%M_%S_%m_%d_%Y", time.localtime())
 		print "starting dataset at {}\n".format(experiment_start_time)
 		data_file = "data/data_" + experiment_start_time + ".csv"
-
-		# relevant bits of AD output
-		button_press_bit = 1 << network.input_channels[0]
-
-		#relevant bits and bit positions of AD inputs
-		# note that button_press_mirror_bit is an AD input while button_press_bit is an AD output
-		button_press_mirror_pos = network.output_channels[0]
-		button_press_mirror_bit = 1 << button_press_mirror_pos
-
-		packet_created_pos = network.output_channels[1]
-		packet_created_bit = 1 << packet_created_pos
-
-		packet_received_pos = network.output_channels[-1]
-		packet_received_bit = 1 << packet_received_pos
-
-		# when post-processing we only care about changes to these bits
-		bits_to_monitor = button_press_mirror_bit | packet_created_bit | packet_received_bit
+		with open(data_file, 'a') as f:
+			f.write("Packet, Sample offset, Latency (ms), [packet_received_bit][packet_created_bit][button_press_mirror_bit]\n")
 
 		##### EXPERIMENT SETUP #####
+		# sample for a max of 1.5 seconds
 		# approximate number of samples assuming ~500ms latency per packet
-		nSamples = 1500000
-
-		# total packets that should be successfully sent for the experiment
-		num_packets_experiment = network.num_packets
+		nSamples = (int) (1.5 * self.sampling_freq)
 
 		num_packets_received = 0
 		num_packets_missed = 0
+
+		# array to hold indices of packets missed
+		packet_number_missed = []
+
 		# num_packets_received + num_packets_missed must equal num_tries
 		num_tries = 0
 		
@@ -290,25 +306,28 @@ class AnalogDiscoveryUtils:
 		# runs for the duration of the experiment
 		#note: openmote toggles its pins every packet creation and reception
 
-		while num_packets_received < num_packets_experiment:
-			# set cSamples (count of samples taken so far) to 0
-			cSamples = 0
+		while num_packets_received < self.num_packets_experiment:
+			#csamples, lost, corrupted
+			buffer_info = [0, 0, 0]
 
 			# clear rgwSamples for next packet
 			rgwSamples = (c_uint16 * nSamples)()
 
 			# reset and configure DigitalIO
-			self._configure_DigitalIO()
+			steady_state_DIO = self._configure_DigitalIO()
 
 			# reset and configure DigitalIn to take nSamples on trigger
 			# set DigitalIn trigger when button_press_mirror_bit channel is raised (this should start sampling)
-			self._configure_DigitalIn(nSamples, button_press_mirror_bit)
+			self._configure_DigitalIn(nSamples, self.button_press_mirror_bit)
+
 
 			ready_for_next_button_press = True
-			print "begin acquisition {}".format(num_tries + 1)
 
+			#print "begin acquisition {}".format(num_tries + 1)
+
+			buffer_flush_start, buffer_flush_stop = 0, 0
 			# inner loop: runs from button press until packet received.
-			while cSamples < nSamples:
+			while buffer_info[0] < nSamples:
 				if ((last_packet_handled == True) and (ready_for_next_button_press == True)):
 					# we can send the next packet because the last packet was handled (received or understood to be missed)
 					# and instruments are configured
@@ -317,86 +336,117 @@ class AnalogDiscoveryUtils:
 
 					#get current value of packet_received_pin; when packet is received this will toggle
 					curr_DIO = self._get_DIO_values()
-					packet_received_pin_state = curr_DIO & packet_received_bit
+					packet_received_pin_state = curr_DIO & self.packet_received_bit
 
 					last_packet_handled = False
 					ready_for_next_button_press = False
 					packet_received = False
 
-					# press the button
-					dwf.FDwfDigitalIOOutputSet(self.interface_handler, c_uint16(button_press_bit))
-					print "button pressed"
+					# press the button. all other outputs go low.
+					dwf.FDwfDigitalIOOutputSet(self.interface_handler, c_uint16(self.button_press_bit))
+					#reset all enabled digital out channels back to steady state (all high except button press)
+					dwf.FDwfDigitalIOOutputSet(self.interface_handler, steady_state_DIO)
+					#print "button pressed"
 
 					num_tries += 1
 
-					#set all enabled digital out channels back low to avoid continuous button presses
-					dwf.FDwfDigitalIOOutputSet(self.interface_handler, c_uint16(0))
+
+				#buffer_flush_start = time.clock()
+				#print "{} ms between buffer reads".format((buffer_flush_start - buffer_flush_stop)*1000)
+				# copy buffer samples to memory and flush
+				buffer_info = self._copy_buffer_samples(buffer_info, nSamples, rgwSamples)
+				#buffer_flush_stop = time.clock()
+
+				#print "buffer read took {} ms".format((buffer_flush_stop - buffer_flush_start)*1000)
 
 				# manually stop sampling once packet_received_bit is not equal to its pin state
 				curr_DIO = self._get_DIO_values()
-				if ((curr_DIO & packet_received_bit) != packet_received_pin_state):
+				if ((curr_DIO & self.packet_received_bit) != packet_received_pin_state):
 					# packet_received_bit toggled 
 					# packet received, stop sampling
 					dwf.FDwfDigitalInConfigure(self.interface_handler, c_bool(0), c_bool(0))
 
 					packet_received = True
 					num_packets_received += 1
-					print "received packet {}".format(num_tries)
+					#print "received packet {}".format(num_tries)
 
 					#copy last buffer samples to memory
-					cSamples = self._copy_buffer_samples(cSamples, nSamples, rgwSamples, last_read=True)
+					buffer_info = self._copy_buffer_samples(buffer_info, nSamples, rgwSamples, last_read=True)
 					break
-
-				# copy buffer samples to memory and continue looping
-				cSamples = self._copy_buffer_samples(cSamples, nSamples, rgwSamples)
 
 			# reach here if packet was received OR if 1.5 million samples have been taken
 			if packet_received == True:
-				self.postprocess(num_packets_received, bits_to_monitor, cSamples, rgwSamples, data_file)
+				self.postprocess(num_tries, buffer_info, rgwSamples, data_file)
 				last_packet_handled = True
 			else:
-				# we took 1.5 million samples and missed the packet
+				# we took 1.5 million samples and supposedly missed the packet
 				num_packets_missed += 1
+				packet_number_missed.append(num_tries)
+				self.postprocess(num_tries, buffer_info, rgwSamples, data_file, missed_packet=True)
 				# set last_packet_handled to True to try button press again
 				last_packet_handled = True
-				print "missed packet {}".format(num_tries)
 
+		run_end_timestamp = time.clock()
 		print "Done with experiment"
 		#print all packets sent, lost, total info
 		print "Number of tries: {}".format(num_tries)
 		print "Number of received packets: {}".format(num_packets_received)
-		print "Number of missed packets: {}".format(num_packets_missed)
+		print "Number of missed packets: {}\n".format(num_packets_missed)
+		print "Total duration: {} seconds".format(run_end_timestamp - run_start_timestamp)
 		return
 
-	def postprocess(self, packet_number, bits_to_monitor, num_samples, data, data_file):
-		"""Only write a sample to the data file if any of the bits in bits_to_monitor change.
-		Trivially, we keep the first sample because it represents the button press.
+	def postprocess(self, attempt_number, buffer_info, data, data_file, missed_packet=False):
+		"""Only write a sample to the data file if any of the DIO bits change.
+		
 		The data saved is an integer with ith bit = 1 if ith channel was high, bit = 0 if channel was low
 		data format: packet #, sample offset, latency (ms), XYZ (sample)
-		where XYZ are [packets_received_bit][packet_created_bit][button_press_mirror_bit]
+
+		If test harness thinks it's a missed packet, we still postprocess and write all the samples to the buffer for later analysis.
+		In order for the data processing script to discern packets that the test harness thinks are missed:
+			instead of writing attempt_number in the first column, we write -attempt_number.
 		"""
-		print "postprocessing {}".format(packet_number)
+		#print "postprocessing {}".format(packet_number)
 
 		pp_start = time.clock()
+		if missed_packet:
+			print "supposedly missed packet {}".format(attempt_number)
+			attempt_number = -1 * attempt_number
+
 		with open(data_file, 'a') as f:
 			# postprocessing
-			index, prev_sample = 0, 0
+			index, prev_sample, latency = 0, 0, 0
 			for sample in data:
-				if index > num_samples:
+				if (index > buffer_info[0]) and (not missed_packet):
+					# we want to check every sample if test harness thinks packet was missed
 					break
-				if ((prev_sample ^ sample) & bits_to_monitor) != 0:
+
+				if (prev_sample ^ sample) != 0:
+				#if ((prev_sample ^ sample) & self.bits_to_monitor) != 0:
 					# one or more of the bits to monitor have changed
-					f.write("{}, {}, {}, {}\n".format(packet_number, index, index / 1000.0, binary_num_str(sample, split=False)))
+
+					#TODO: add check to see if sample is weird. every output bit other than button press must always be high.
+					#sample_output_str = str(get_bit(sample, self.packet_received_pos))
+					#sample_output_str += str(get_bit(sample, self.packet_created_pos))
+					#sample_output_str += str(get_bit(sample,  self.button_press_mirror_pos))
+					sample_output_str = binary_num_str(sample, split=True)
+					latency = index * self.period_ms
+					f.write("{}, {}, {}, {}\n".format(attempt_number, index, latency, sample_output_str))
+
 				index += 1
 				prev_sample = sample
 
 		pp_stop = time.clock()
-		print "took {} samples for packet {}".format(index, packet_number)
-		print "postprocessing took {} seconds".format(pp_stop - pp_start)
-		print "\n"
+		if missed_packet:
+			print "postprocessing took {} seconds".format(pp_stop - pp_start)
+		else:		
+			print "{}  {}".format(attempt_number, latency)
+		#print "cSamples: {}, cLost: {}, cCorrupted: {}".format(buffer_info[0], buffer_info[1], buffer_info[2])
+		#print "took {} samples for packet {}".format(index, packet_number)
+		#print "postprocessing took {} seconds".format(pp_stop - pp_start)
+		#print "\n"
 		return
 
-	def test(self, network):
+	def test(self):
 		"""Miscellaneous testing."""
 		self._configure_DigitalIO()
 
@@ -418,56 +468,75 @@ def get_bit(num, position):
 	"""
 	return (num >> position) & 0b1
 
+def get_bit_positions(bit_mask):
+	"""Return an array of positions for each enabled bit in bit_mask."""
+	bit_positions = []
+	# find bit positions of enabled bits in mask
+	for i in range(16):
+		if (bit_mask & (1 << i)) != 0:
+			bit_positions.append(i)
+	return bit_positions
+
+def concatenate_bits(num, bit_mask):
+	"""For each bit that is set in bit_mask, concatenate the bits in those positions in num.
+	Example: num = 0b101010, bit_mask = 0b110101 -> return 0b1000
+	Assume num, bit_mask are 16 bits.
+	"""
+	bit_positions = get_bit_positions(bit_mask)
+	num_bits_at_positions = [get_bit(num, pos) for pos in bit_positions]
+	out = 0
+	for bit in num_bits_at_positions:
+		out = (out << 1) | bit
+	return out
 
 def binary_num_str(num, split=True):
 	"""returns a string of num in binary form in chunks of 4.
 	Makes it easier to read.
 	"""
-	assert 0 <= num < 2 ** 16
 	num_bin_str = "{}".format(bin(num))[2:].zfill(16)
 	if not split:
 		return num_bin_str
 
 	num_chunks = [num_bin_str[4*i:4*(i+1)] for i in xrange(len(num_bin_str)//4)]
-	output_str = "{} {} {} {}".format(num_chunks[0], num_chunks[1], num_chunks[2], num_chunks[3])
+	output_str = ""
+	for chunk in num_chunks:
+		output_str += "{} ".format(chunk)
 	return output_str
 
-def initialize_networks(num_networks):
-	""" Initializes all networks """
+def initialize_network(network_output_channels, network_input_channels, num_packets_to_send):
+	""" Initializes a network. """
+	assert len(network_output_channels) == 3
+	assert len(network_input_channels) == 1
 
-	# keep asking for networks
-	for number in range(num_networks):
-		print "Network {}:".format(number)
-		print "If entering multiple values, please separate them with commas and a space."
-		print "Example: 2, 3, 4\n"
+	for channel in network_output_channels:
+		assert 0 <= channel < 16
+	for channel in network_input_channels:
+		assert 0 <= channel < 16
+	# create new network
+	network = Network(network_output_channels, network_input_channels, num_packets_to_send)
 
-		print "Network output channels: channels to measure network. These are digital inputs to AD2."
-		print "Format: [button press mirror channel], [packet creation channel], [packet reception channel]"
-		output_channels = raw_input("   Network output channels: ")
-
-		print "\nNetwork input channels: digital IO channel which is the button press. This is the \"button press\" digital output from AD2."
-		print "For 1-1 case: only one channel can be a network input channel."
-		input_channels = raw_input("   Network input channels: ")
-
-		# convert channels from string of comma separated ints to list of ints
-		output_channels = [int(i) for i in output_channels.split(", ")]
-		input_channels = [int(i) for i in input_channels.split(", ")]
-
-		for channel in output_channels:
-			assert 0 <= channel < 16
-		for channel in input_channels:
-			assert 0 <= channel < 16
-
-		num_packets_to_send = input("   Number of packets to send: ")
-
-		# create new network
-		network = Network(output_channels, input_channels, num_packets_to_send)
-
-		# add to global array of networks
-		list_of_networks.append(network)
-
+	# add to global array of networks
+	list_of_networks.append(network)
+	return
 
 if __name__ == "__main__":
+	### Parse input to initialize variables ###
+	file_input_format_info = "Input file format:\n"
+	file_input_format_info += "[button press mirror channel], [packet creation channel], [packet reception channel]\n"
+	file_input_format_info += "[button press channel]\n"
+	file_input_format_info += "[number of packets to send]\n"
+	file_input_format_info += "[sampling frequency]\n\n"
+
+	assert len(sys.argv) == 2
+	input_file = sys.argv[1]
+
+	with open(input_file) as file:
+		params = file.readlines()
+	#remove whitespace characters in each line
+	params = [x.strip() for x in params]
+	#convert string of comma separated ints to list of ints
+	params = [[int(i) for i in line.split(", ")] for line in params]
+
 	if sys.platform.startswith("win"):
 		dwf = cdll.dwf
 	elif sys.platform.startswith("darwin"):
@@ -480,18 +549,16 @@ if __name__ == "__main__":
 	dwf.FDwfGetVersion(version)
 	print "DWF Version: " + version.value
 
-	# TODO: set program parameters in file and automatically pass them in
-	num_networks = input("Number of networks: ")
-	initialize_networks(num_networks)
+	initialize_network(params[0], params[1], params[2][0])
 
-	ad_utils = AnalogDiscoveryUtils()
+	sampling_freq_user_input = params[3][0]
+	ad_utils = AnalogDiscoveryUtils(sampling_freq_user_input)
 	ad_utils.open_device()
 
 	try:
 		for network in list_of_networks:
 			ad_utils.add_network(network)
-			#ad_utils.test(network)
-			ad_utils.run(network)
+			ad_utils.run()
 	except KeyboardInterrupt:
 		dwf.FDwfDigitalIOReset(ad_utils.interface_handler)
 		ad_utils.close_device()
