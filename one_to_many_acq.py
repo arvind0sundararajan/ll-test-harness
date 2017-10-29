@@ -68,7 +68,7 @@ class AnalogDiscoveryUtils:
         self.packet_created_bit = -1
 
         self.packet_received_pos = -1
-        self.packet_received_bit = -1
+        self.packet_received_bits = 0
 
         # when post-processing we only care about changes to these bits
         self.bits_to_monitor = -1
@@ -126,35 +126,36 @@ class AnalogDiscoveryUtils:
         self.num_packets_experiment = network.num_packets
 
         # relevant bits of AD output
-        self.button_press_pos = network.input_channels[0]
-        self.button_press_bit = 1 << self.button_press_pos
+        self.button_press_pos = network.button_press_channel    # not sure if this variable is needed
+        self.button_press_bit = 1 << network.button_press_channel
 
         #relevant bits and bit positions of AD inputs
         # note that button_press_mirror_bit is an AD input while button_press_bit is an AD output
-        self.button_press_mirror_pos = network.output_channels[0]
-        self.button_press_mirror_bit = 1 << self.button_press_mirror_pos
+        self.button_press_mirror_pos = network.mirror_channel    # not sure if this variable is needed
+        self.button_press_mirror_bit = 1 << network.mirror_channel
 
-        self.packet_created_pos = network.output_channels[1]
-        self.packet_created_bit = 1 << self.packet_created_pos
+        self.packet_created_pos = network.creation_channel    # not sure if this variable is needed
+        self.packet_created_bit = 1 << network.creation_channel
 
-        self.packet_received_pos = network.output_channels[-1]
-        self.packet_received_bit = 1 << self.packet_received_pos
+        rx_channels = network.reception_channels
+        for ch in rx_channels:
+            self.packet_received_bits = self.packet_received_bit | (1 << ch)
 
         # when post-processing we only care about changes to these bits
-        self.bits_to_monitor = self.button_press_mirror_bit | self.packet_created_bit | self.packet_received_bit
-        self.num_channels_to_monitor = len(network.output_channels)
+        self.bits_to_monitor = self.button_press_mirror_bit | self.packet_created_bit | self.packet_received_bits
+        self.num_channels_to_monitor = 2 + len(rx_channels)     # monitor miror channel, creation channel, rx channels
 
         self.input_channels_bit_rep = self.bits_to_monitor
 
         # every channel that is not a network input channel is an AD output
-        self.output_channels_bit_rep = ((2 ** 16) - 1) ^ self.input_channels_bit_rep
+        self.output_channels_bit_rep = 0xFFFF ^ self.input_channels_bit_rep
 
         self.network_added = True
 
         print "button_press_bit: {}".format(binary_num_str(self.button_press_bit))
         print "button_press_mirror_bit: {}".format(binary_num_str(self.button_press_mirror_bit))
         print "packet_created_bit: {}".format(binary_num_str(self.packet_created_bit))
-        print "packet_received_bit: {}".format(binary_num_str(self.packet_received_bit))
+        print "packet_received_bits: {}".format(binary_num_str(self.packet_received_bits))
         print "bits_to_monitor: {}\n".format(binary_num_str(self.bits_to_monitor))
 
         #print AD2 output and input channels
@@ -247,7 +248,7 @@ class AnalogDiscoveryUtils:
         cSamples = buffer_info[0]
 
         # get DigitalIn status because we want to read from buffer
-        self._get_DigitalIn_status(read_data=True)
+        self._get_DigitalIn_status(read_data=True)      # confused what this actually does
 
         # record info about the data collection process (filling of the buffer)
         dwf.FDwfDigitalInStatusRecord(self.interface_handler, byref(cAvailable), byref(cLost), byref(cCorrupted))
@@ -259,7 +260,7 @@ class AnalogDiscoveryUtils:
         # copy samples to arr on computer
         dwf.FDwfDigitalInStatusData(self.interface_handler, byref(arr, 2*cSamples), c_int(2*cAvailable.value))
 
-        if (last_read == False):
+        if not last_read:
             cSamples += cAvailable.value
 
         buffer_info = [cSamples, buffer_info[1] + cLost.value, buffer_info[2] + cCorrupted.value]
@@ -334,7 +335,7 @@ class AnalogDiscoveryUtils:
             buffer_flush_start, buffer_flush_stop = 0, 0
             # inner loop: runs from button press until packet received.
             while buffer_info[0] < nSamples:
-                if ((last_packet_handled == True) and (ready_for_next_button_press == True)):
+                if last_packet_handled and ready_for_next_button_press:
                     # we can send the next packet because the last packet was handled (received or understood to be missed)
                     # and instruments are configured
                     # button press -> set value on enabled AD2 output pins (digital_out_channels_bits)
@@ -342,7 +343,7 @@ class AnalogDiscoveryUtils:
 
                     #get current value of packet_received_pin; when packet is received this will toggle
                     curr_DIO = self._get_DIO_values()
-                    packet_received_pin_state = curr_DIO & self.packet_received_bit
+                    packet_received_pin_state = curr_DIO & self.packet_received_bits
 
                     last_packet_handled = False
                     ready_for_next_button_press = False
@@ -367,7 +368,7 @@ class AnalogDiscoveryUtils:
 
                 # manually stop sampling once packet_received_bit is not equal to its pin state
                 curr_DIO = self._get_DIO_values()
-                if ((curr_DIO & self.packet_received_bit) != packet_received_pin_state):
+                if (curr_DIO & self.packet_received_bits) != packet_received_pin_state:
                     # packet_received_bit toggled 
                     # packet received, stop sampling
                     dwf.FDwfDigitalInConfigure(self.interface_handler, c_bool(0), c_bool(0))
@@ -381,7 +382,7 @@ class AnalogDiscoveryUtils:
                     break
 
             # reach here if packet was received OR if 1.5 million samples have been taken
-            if packet_received == True:
+            if packet_received:
                 self.postprocess(num_tries, buffer_info, rgwSamples, data_file)
                 last_packet_handled = True
             else:
@@ -422,11 +423,11 @@ class AnalogDiscoveryUtils:
             # postprocessing
             index, prev_sample, latency = 0, 0, 0
             for sample in data:
-                if (index > buffer_info[0]) and (not missed_packet):
+                if index > buffer_info[0] and not missed_packet:
                     # we want to check every sample if test harness thinks packet was missed
                     break
 
-                if (prev_sample ^ sample) != 0:
+                if prev_sample ^ sample:
                 #if ((prev_sample ^ sample) & self.bits_to_monitor) != 0:
                     # one or more of the bits to monitor have changed
 
