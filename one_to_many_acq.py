@@ -328,13 +328,14 @@ class AnalogDiscoveryUtils:
             self._configure_DigitalIn(nSamples, self.button_press_mirror_bit)
 
 
-            ready_for_next_button_press = True
+            ready_for_next_button_press = True      # just wondering what this was for
 
             #print "begin acquisition {}".format(num_tries + 1)
 
             buffer_flush_start, buffer_flush_stop = 0, 0
             # inner loop: runs from button press until packet received.
             while buffer_info[0] < nSamples:
+                # I think we can put this outside the loop
                 if last_packet_handled and ready_for_next_button_press:
                     # we can send the next packet because the last packet was handled (received or understood to be missed)
                     # and instruments are configured
@@ -427,6 +428,7 @@ class AnalogDiscoveryUtils:
                     # we want to check every sample if test harness thinks packet was missed
                     break
 
+                # what if we only checked the reception channels for differences (maybe not a big deal bc we do above)
                 if prev_sample ^ sample:
                 #if ((prev_sample ^ sample) & self.bits_to_monitor) != 0:
                     # one or more of the bits to monitor have changed
