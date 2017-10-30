@@ -164,7 +164,7 @@ class AnalogDiscoveryUtils:
 		# read state of all pins, regardless of output enable
 		dwf.FDwfDigitalIOInputStatus(self.interface_handler, byref(dio_pins))
 		if print_vals:
-			print "Digital IO Pins:  " + binary_num_str(dio_pins.value) + "\n"
+			print "Digital IO Pins:  " + binary_num_str(dio_pins.value)
 		return dio_pins.value
 
 	def _configure_DigitalIO(self):
@@ -231,7 +231,7 @@ class AnalogDiscoveryUtils:
 		dwf.FDwfDigitalInStatus(self.interface_handler, c_int(0), byref(status))
 		return status
 	
-	def _copy_buffer_samples(self, buffer_info, nSamples, arr, last_read=False):
+	def _copy_buffer_samples(self, buffer_info, nSamples, arr, copy_all_samples=False, last_read=False):
 		"""Copies samples from the AD2 buffer to arr (located on computer memory).
 		Returns the updated cSamples.
 		"""
@@ -245,6 +245,10 @@ class AnalogDiscoveryUtils:
 
 		# record info about the data collection process (filling of the buffer)
 		dwf.FDwfDigitalInStatusRecord(self.interface_handler, byref(cAvailable), byref(cLost), byref(cCorrupted))
+
+		if copy_all_samples:
+			dwf.FDwfDigitalInStatusData(self.interface_handler, byref(arr), c_int(2*4096))
+			return [0, 0, 0]
 
 		cSamples += cLost.value
 		if cSamples + cAvailable.value > nSamples:
@@ -286,6 +290,9 @@ class AnalogDiscoveryUtils:
 		# approximate number of samples assuming ~500ms latency per packet
 		nSamples = (int) (1.5 * self.sampling_freq)
 
+		#csamples, lost, corrupted
+		buffer_info = [0, 0, 0]
+
 		num_packets_received = 0
 		num_packets_missed = 0
 
@@ -294,7 +301,7 @@ class AnalogDiscoveryUtils:
 
 		# num_packets_received + num_packets_missed must equal num_tries
 		num_tries = 0
-		
+
 		# ready for next button press if previous packet has been handled
 		# and if instruments, variables are configured for next packet
 		last_packet_handled = True
@@ -307,8 +314,12 @@ class AnalogDiscoveryUtils:
 		#note: openmote toggles its pins every packet creation and reception
 
 		while num_packets_received < self.num_packets_experiment:
-			#csamples, lost, corrupted
-			buffer_info = [0, 0, 0]
+			# initialize "trash" array to clear all buffer samples before starting button press
+			# this must be able to hold 4096 samples, 2 bytes each
+			trashSamples = (c_uint16 * 4096)()
+
+			#clear buffer
+			buffer_info = self._copy_buffer_samples(buffer_info, nSamples, trashSamples, copy_all_samples=True)
 
 			# clear rgwSamples for next packet
 			rgwSamples = (c_uint16 * nSamples)()
@@ -320,14 +331,14 @@ class AnalogDiscoveryUtils:
 			# set DigitalIn trigger when button_press_mirror_bit channel is raised (this should start sampling)
 			self._configure_DigitalIn(nSamples, self.button_press_mirror_bit)
 
-
 			ready_for_next_button_press = True
 
-			#print "begin acquisition {}".format(num_tries + 1)
+			print "begin acquisition {}".format(num_tries + 1)
 
 			buffer_flush_start, buffer_flush_stop = 0, 0
 			# inner loop: runs from button press until packet received.
 			while buffer_info[0] < nSamples:
+				print buffer_info
 				if ((last_packet_handled == True) and (ready_for_next_button_press == True)):
 					# we can send the next packet because the last packet was handled (received or understood to be missed)
 					# and instruments are configured
@@ -346,7 +357,8 @@ class AnalogDiscoveryUtils:
 					dwf.FDwfDigitalIOOutputSet(self.interface_handler, c_uint16(self.button_press_bit))
 					#reset all enabled digital out channels back to steady state (all high except button press)
 					dwf.FDwfDigitalIOOutputSet(self.interface_handler, steady_state_DIO)
-					#print "button pressed"
+					
+					print "button pressed"
 
 					num_tries += 1
 
@@ -368,7 +380,7 @@ class AnalogDiscoveryUtils:
 
 					packet_received = True
 					num_packets_received += 1
-					#print "received packet {}".format(num_tries)
+					print "received packet {}".format(num_tries)
 
 					#copy last buffer samples to memory
 					buffer_info = self._copy_buffer_samples(buffer_info, nSamples, rgwSamples, last_read=True)
@@ -460,7 +472,7 @@ class AnalogDiscoveryUtils:
 		for i in range(16):
 			output = c_uint16(1<<i)
 			dwf.FDwfDigitalIOOutputSet(self.interface_handler, output)
-			self._get_DIO_values(print_vals=True) 
+			[self._get_DIO_values(print_vals=True) for j in range(10)]
 		return
 
 def get_bit(num, position):
@@ -558,7 +570,8 @@ if __name__ == "__main__":
 	try:
 		for network in list_of_networks:
 			ad_utils.add_network(network)
-			ad_utils.run()
+			#ad_utils.run()
+			ad_utils.test()
 	except KeyboardInterrupt:
 		dwf.FDwfDigitalIOReset(ad_utils.interface_handler)
 		ad_utils.close_device()

@@ -13,6 +13,8 @@ def write_missed_packet_samples(output_data_file, missed_packets_samples):
 	print "writing missed packet samples to separate data file"
 	missed_samples_data_file = output_data_file + "_missed_packet_samples"
 
+	missed_packet_nums = []
+
 	with open(missed_samples_data_file + ".csv", "a") as file:
 		#title
 		file.write("missed packet number, sample offset, latency (ms), sample\n")
@@ -20,8 +22,14 @@ def write_missed_packet_samples(output_data_file, missed_packets_samples):
 		for sample_info in missed_packets_samples:
 			#each element should be an array of strings
 			file.write(sample_info[0] + ", " + sample_info[1] + ", " + sample_info[2] + ", " + sample_info[3] + "\n")
+			curr_num = int(sample_info[0])
+			if curr_num not in missed_packet_nums:
+				missed_packet_nums.append(curr_num)
 
 	print "finished writing missed packet samples to separate data file"
+	print "test harness reported {} missed packets\nmissed packets:".format(len(missed_packet_nums))
+	for i in missed_packet_nums:
+		print -1 * i 
 	return
 
 def parse_data(input_data_file):
@@ -83,10 +91,11 @@ def parse_data(input_data_file):
 
 			prev_sample_info = curr_sample_info
 
-		#save the final packet
+		#save the final packet if it was not missed
 		prev_packet_num = int(prev_sample_info[0])
-		prev_packet_latency = float(prev_sample_info[2])
-		output_data.append([prev_packet_num, prev_packet_latency])
+		if (prev_packet_num > 0):
+			prev_packet_latency = float(prev_sample_info[2])
+			output_data.append([prev_packet_num, prev_packet_latency])
 
 	print "done parsing input data"
 	return [missed_packets_data, output_data]
@@ -103,7 +112,8 @@ def write_new_data(output_data_file_str, data_to_write):
 		write_missed_packet_samples(output_data_file_str, missed_packet_samples_data)
 
 	with open(output_data_file_str + ".csv", 'a') as file:
-		file.write("Packet, Latency (ms)\n")
+		#omit headers because ipython notebook only wants ints and floats to parse.
+		#file.write("Packet, Latency (ms)\n")
 
 		for packet in packet_latencies:
 			file.write("{}, {}\n".format(packet[0], packet[1]))
