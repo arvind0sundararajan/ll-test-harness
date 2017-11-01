@@ -334,13 +334,10 @@ class AnalogDiscoveryUtils:
 			broke_early = False
 
 			#print "begin acquisition {}".format(num_tries + 1)
-
 			prev_csamples, curr_csamples = 0, 0
 
-			# inner loop: runs from button press until packet received.
-			while buffer_info[0] < nSamples:
-				#print buffer_info
-				if ((last_packet_handled == True) and (ready_for_next_button_press == True)):
+			# enter inner loop after button press
+			if ((last_packet_handled == True) and (ready_for_next_button_press == True)):
 					# we can send the next packet because the last packet was handled (received or understood to be missed)
 					# and instruments are configured
 					# button press -> set value on enabled AD2 output pins (digital_out_channels_bits)
@@ -362,12 +359,16 @@ class AnalogDiscoveryUtils:
 					#print "button pressed"
 					num_tries += 1
 
+			# inner loop: runs from button press until packet received.
+			while buffer_info[0] < nSamples:
+
 				# copy buffer samples to memory and flush
 				buffer_info = self._copy_buffer_samples(buffer_info, nSamples, rgwSamples)
 				#buffer_flush_stop = time.clock()
 
 				curr_csamples = buffer_info[0]
 				if curr_csamples == prev_csamples:
+					print "broke early"
 					num_tries -= 1
 					broke_early = True
 					break
@@ -455,6 +456,7 @@ class AnalogDiscoveryUtils:
 					#sample_output_str += str(get_bit(sample, self.packet_created_pos))
 					#sample_output_str += str(get_bit(sample,  self.button_press_mirror_pos))
 					sample_output_str = binary_num_str(sample, split=True)
+					#print sample_output_str
 					latency = index * self.period_ms
 					f.write("{}, {}, {}, {}\n".format(attempt_number, index, latency, sample_output_str))
 
