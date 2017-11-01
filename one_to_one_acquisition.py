@@ -281,7 +281,7 @@ class AnalogDiscoveryUtils:
 		run_start_timestamp = time.clock()
 		experiment_start_time = time.strftime("%H_%M_%S_%m_%d_%Y", time.localtime())
 		print "starting dataset at {}\n".format(experiment_start_time)
-		data_file = "data/data_" + experiment_start_time + ".csv"
+		data_file = "raw_data/data_" + experiment_start_time + ".csv"
 		with open(data_file, 'a') as f:
 			f.write("Packet, Sample offset, Latency (ms), [packet_received_bit][packet_created_bit][button_press_mirror_bit]\n")
 
@@ -313,7 +313,7 @@ class AnalogDiscoveryUtils:
 		# runs for the duration of the experiment
 		#note: openmote toggles its pins every packet creation and reception
 
-		while num_packets_received < self.num_packets_experiment:
+		while num_tries < self.num_packets_experiment:
 			# initialize "trash" array to clear all buffer samples before starting button press
 			# this must be able to hold 4096 samples, 2 bytes each
 			trashSamples = (c_uint16 * 4096)()
@@ -333,12 +333,15 @@ class AnalogDiscoveryUtils:
 
 			ready_for_next_button_press = True
 
-			print "begin acquisition {}".format(num_tries + 1)
+			#print "begin acquisition {}".format(num_tries + 1)
 
 			buffer_flush_start, buffer_flush_stop = 0, 0
+
+			prev_csamples, curr_csamples = 0, 0
+
 			# inner loop: runs from button press until packet received.
 			while buffer_info[0] < nSamples:
-				print buffer_info
+				#print buffer_info
 				if ((last_packet_handled == True) and (ready_for_next_button_press == True)):
 					# we can send the next packet because the last packet was handled (received or understood to be missed)
 					# and instruments are configured
@@ -358,8 +361,7 @@ class AnalogDiscoveryUtils:
 					#reset all enabled digital out channels back to steady state (all high except button press)
 					dwf.FDwfDigitalIOOutputSet(self.interface_handler, steady_state_DIO)
 					
-					print "button pressed"
-
+					#print "button pressed"
 					num_tries += 1
 
 
@@ -368,8 +370,12 @@ class AnalogDiscoveryUtils:
 				# copy buffer samples to memory and flush
 				buffer_info = self._copy_buffer_samples(buffer_info, nSamples, rgwSamples)
 				#buffer_flush_stop = time.clock()
-
 				#print "buffer read took {} ms".format((buffer_flush_stop - buffer_flush_start)*1000)
+
+				curr_csamples = buffer_info[0]
+				if curr_csamples == prev_csamples:
+					num_tries -= 1
+					break
 
 				# manually stop sampling once packet_received_bit is not equal to its pin state
 				curr_DIO = self._get_DIO_values()
@@ -380,11 +386,14 @@ class AnalogDiscoveryUtils:
 
 					packet_received = True
 					num_packets_received += 1
-					print "received packet {}".format(num_tries)
+					#print "received packet {}".format(num_tries)
 
 					#copy last buffer samples to memory
 					buffer_info = self._copy_buffer_samples(buffer_info, nSamples, rgwSamples, last_read=True)
 					break
+
+				prev_csamples = curr_csamples
+				# end of the inner loop
 
 			# reach here if packet was received OR if 1.5 million samples have been taken
 			if packet_received == True:
@@ -428,11 +437,13 @@ class AnalogDiscoveryUtils:
 			# postprocessing
 			index, prev_sample, latency = 0, 0, 0
 			for sample in data:
-				if (index > buffer_info[0]) and (not missed_packet):
+				if (index > buffer_info[0]):
 					# we want to check every sample if test harness thinks packet was missed
 					break
 
-				if (prev_sample ^ sample) != 0:
+				if ((prev_sample ^ sample) != 0):
+					# if sample is zero something wrong happened when reading from the buffer
+
 				#if ((prev_sample ^ sample) & self.bits_to_monitor) != 0:
 					# one or more of the bits to monitor have changed
 
@@ -570,8 +581,8 @@ if __name__ == "__main__":
 	try:
 		for network in list_of_networks:
 			ad_utils.add_network(network)
-			#ad_utils.run()
-			ad_utils.test()
+			ad_utils.run()
+			#ad_utils.test()
 	except KeyboardInterrupt:
 		dwf.FDwfDigitalIOReset(ad_utils.interface_handler)
 		ad_utils.close_device()
