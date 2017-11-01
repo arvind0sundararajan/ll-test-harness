@@ -257,8 +257,7 @@ class AnalogDiscoveryUtils:
 		# copy samples to arr on computer
 		dwf.FDwfDigitalInStatusData(self.interface_handler, byref(arr, 2*cSamples), c_int(2*cAvailable.value))
 
-		if (last_read == False):
-			cSamples += cAvailable.value
+		cSamples += cAvailable.value
 
 		buffer_info = [cSamples, buffer_info[1] + cLost.value, buffer_info[2] + cCorrupted.value]
 		return buffer_info
@@ -332,10 +331,9 @@ class AnalogDiscoveryUtils:
 			self._configure_DigitalIn(nSamples, self.button_press_mirror_bit)
 
 			ready_for_next_button_press = True
+			broke_early = False
 
 			#print "begin acquisition {}".format(num_tries + 1)
-
-			buffer_flush_start, buffer_flush_stop = 0, 0
 
 			prev_csamples, curr_csamples = 0, 0
 
@@ -364,48 +362,51 @@ class AnalogDiscoveryUtils:
 					#print "button pressed"
 					num_tries += 1
 
-
-				#buffer_flush_start = time.clock()
-				#print "{} ms between buffer reads".format((buffer_flush_start - buffer_flush_stop)*1000)
 				# copy buffer samples to memory and flush
 				buffer_info = self._copy_buffer_samples(buffer_info, nSamples, rgwSamples)
 				#buffer_flush_stop = time.clock()
-				#print "buffer read took {} ms".format((buffer_flush_stop - buffer_flush_start)*1000)
 
 				curr_csamples = buffer_info[0]
 				if curr_csamples == prev_csamples:
 					num_tries -= 1
+					broke_early = True
 					break
 
 				# manually stop sampling once packet_received_bit is not equal to its pin state
 				curr_DIO = self._get_DIO_values()
 				if ((curr_DIO & self.packet_received_bit) != packet_received_pin_state):
-					# packet_received_bit toggled 
-					# packet received, stop sampling
+					#copy last buffer samples to memory
+					buffer_info = self._copy_buffer_samples(buffer_info, nSamples, rgwSamples, last_read=True)
+
+					# packet_received_bit toggled; stop sampling
 					dwf.FDwfDigitalInConfigure(self.interface_handler, c_bool(0), c_bool(0))
 
 					packet_received = True
 					num_packets_received += 1
 					#print "received packet {}".format(num_tries)
 
-					#copy last buffer samples to memory
-					buffer_info = self._copy_buffer_samples(buffer_info, nSamples, rgwSamples, last_read=True)
 					break
 
 				prev_csamples = curr_csamples
 				# end of the inner loop
 
+			#set this so we can push button again
+			last_packet_handled = True
+
+			if broke_early:
+				continue
+
 			# reach here if packet was received OR if 1.5 million samples have been taken
 			if packet_received == True:
 				self.postprocess(num_tries, buffer_info, rgwSamples, data_file)
-				last_packet_handled = True
+
 			else:
 				# we took 1.5 million samples and supposedly missed the packet
 				num_packets_missed += 1
 				packet_number_missed.append(num_tries)
 				self.postprocess(num_tries, buffer_info, rgwSamples, data_file, missed_packet=True)
 				# set last_packet_handled to True to try button press again
-				last_packet_handled = True
+
 
 		run_end_timestamp = time.clock()
 		print "Done with experiment"
@@ -439,6 +440,8 @@ class AnalogDiscoveryUtils:
 			for sample in data:
 				if (index > buffer_info[0]):
 					# we want to check every sample if test harness thinks packet was missed
+					if latency == 4.096:
+						print "only took 4096 samples?"
 					break
 
 				if ((prev_sample ^ sample) != 0):
