@@ -67,6 +67,7 @@ class AnalogDiscoveryUtils:
         self.packet_created_pos = -1
         self.packet_created_bit = -1
 
+        # an array?
         self.packet_received_pos = -1
         self.packet_received_bits = 0
 
@@ -238,7 +239,7 @@ class AnalogDiscoveryUtils:
         dwf.FDwfDigitalInStatus(self.interface_handler, c_int(0), byref(status))
         return status
     
-    def _copy_buffer_samples(self, buffer_info, nSamples, arr, last_read=False):
+    def _copy_buffer_samples(self, buffer_info, nSamples, arr, copy_all_samples=False, last_read=False):
         """Copies samples from the AD2 buffer to arr (located on computer memory).
         Returns the updated cSamples.
         """
@@ -252,6 +253,10 @@ class AnalogDiscoveryUtils:
 
         # record info about the data collection process (filling of the buffer)
         dwf.FDwfDigitalInStatusRecord(self.interface_handler, byref(cAvailable), byref(cLost), byref(cCorrupted))
+
+        if copy_all_samples:
+            dwf.FDwfDigitalInStatusData(self.interface_handler, byref(arr), c_int(2*4096))
+            return [0, 0, 0]
 
         cSamples += cLost.value
         if cSamples + cAvailable.value > nSamples:

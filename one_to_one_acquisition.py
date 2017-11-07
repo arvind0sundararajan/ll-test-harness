@@ -61,8 +61,7 @@ class AnalogDiscoveryUtils:
 		self.packet_created_pos = -1
 		self.packet_created_bit = -1
 
-		self.packet_received_pos = -1
-		self.packet_received_bit = -1
+		self.packet_received_bits = -1
 
 		# when post-processing we only care about changes to these bits
 		self.bits_to_monitor = -1
@@ -131,11 +130,13 @@ class AnalogDiscoveryUtils:
 		self.packet_created_pos = network.output_channels[1]
 		self.packet_created_bit = 1 << self.packet_created_pos
 
-		self.packet_received_pos = network.output_channels[-1]
-		self.packet_received_bit = 1 << self.packet_received_pos
+		self.packet_received_bits = 0
+		# get all packet reception inputs
+		for ch in network.output_channels[2:]:
+			self.packet_received_bits = self.packet_received_bits|(1 << ch)
 
 		# when post-processing we only care about changes to these bits
-		self.bits_to_monitor = self.button_press_mirror_bit | self.packet_created_bit | self.packet_received_bit
+		self.bits_to_monitor = self.button_press_mirror_bit | self.packet_created_bit | self.packet_received_bits
 		self.num_channels_to_monitor = len(network.output_channels)
 
 		self.input_channels_bit_rep = self.bits_to_monitor
@@ -148,7 +149,7 @@ class AnalogDiscoveryUtils:
 		print "button_press_bit: {}".format(binary_num_str(self.button_press_bit))
 		print "button_press_mirror_bit: {}".format(binary_num_str(self.button_press_mirror_bit))
 		print "packet_created_bit: {}".format(binary_num_str(self.packet_created_bit))
-		print "packet_received_bit: {}".format(binary_num_str(self.packet_received_bit))
+		print "packet_received_bits: {}".format(binary_num_str(self.packet_received_bits))
 		print "bits_to_monitor: {}\n".format(binary_num_str(self.bits_to_monitor))
 
 		#print AD2 output and input channels
@@ -282,7 +283,7 @@ class AnalogDiscoveryUtils:
 		print "starting dataset at {}\n".format(experiment_start_time)
 		data_file = "raw_data/data_" + experiment_start_time + ".csv"
 		with open(data_file, 'a') as f:
-			f.write("Packet, Sample offset, Latency (ms), [packet_received_bit][packet_created_bit][button_press_mirror_bit]\n")
+			f.write("Packet, Sample offset, Latency (ms), Sample\n")
 
 		##### EXPERIMENT SETUP #####
 		# sample for a max of 1.5 seconds
@@ -294,6 +295,7 @@ class AnalogDiscoveryUtils:
 
 		num_packets_received = 0
 		num_packets_missed = 0
+		num_acks_missed = 0
 
 		# array to hold indices of packets missed
 		packet_number_missed = []
@@ -306,6 +308,10 @@ class AnalogDiscoveryUtils:
 		last_packet_handled = True
 		# keep track of if current packet has been received
 		packet_received = True
+
+		#keep track of previous packet acknowledgment
+		ack_missed = False
+
 		##### END SETUP #####
 
 		##### MAIN LOOP of experiment. #####
@@ -336,8 +342,16 @@ class AnalogDiscoveryUtils:
 			#print "begin acquisition {}".format(num_tries + 1)
 			prev_csamples, curr_csamples = 0, 0
 
-			# enter inner loop after button press
-			if ((last_packet_handled == True) and (ready_for_next_button_press == True)):
+			if ack_missed:
+				print "missed ack"
+				time.sleep(0.55)
+
+
+			# inner loop: runs from button press until packet received.
+			while buffer_info[0] < nSamples:
+
+				# button press
+				if last_packet_handled and ready_for_next_button_press:
 					# we can send the next packet because the last packet was handled (received or understood to be missed)
 					# and instruments are configured
 					# button press -> set value on enabled AD2 output pins (digital_out_channels_bits)
@@ -345,11 +359,13 @@ class AnalogDiscoveryUtils:
 
 					#get current value of packet_received_pin; when packet is received this will toggle
 					curr_DIO = self._get_DIO_values()
-					packet_received_pin_state = curr_DIO & self.packet_received_bit
+					packet_received_pins_state = curr_DIO & self.packet_received_bits
+					packet_created_pin_state = curr_DIO & self.packet_created_bit
 
 					last_packet_handled = False
 					ready_for_next_button_press = False
 					packet_received = False
+					ack_missed = False
 
 					# press the button. all other outputs go low.
 					dwf.FDwfDigitalIOOutputSet(self.interface_handler, c_uint16(self.button_press_bit))
@@ -359,11 +375,10 @@ class AnalogDiscoveryUtils:
 					#print "button pressed"
 					num_tries += 1
 
-			# inner loop: runs from button press until packet received.
-			while buffer_info[0] < nSamples:
-
 				# copy buffer samples to memory and flush
+				#print "Before: {}".format(buffer_info)
 				buffer_info = self._copy_buffer_samples(buffer_info, nSamples, rgwSamples)
+				#print "After: {}".format(buffer_info)
 				#buffer_flush_stop = time.clock()
 
 				curr_csamples = buffer_info[0]
@@ -371,16 +386,23 @@ class AnalogDiscoveryUtils:
 					print "broke early"
 					num_tries -= 1
 					broke_early = True
+
+					# stop sampling
+					dwf.FDwfDigitalInConfigure(self.interface_handler, c_bool(0), c_bool(0))
 					break
 
 				# manually stop sampling once packet_received_bit is not equal to its pin state
 				curr_DIO = self._get_DIO_values()
-				if ((curr_DIO & self.packet_received_bit) != packet_received_pin_state):
+				if ((curr_DIO & self.packet_received_bits) != packet_received_pins_state):
 					#copy last buffer samples to memory
 					buffer_info = self._copy_buffer_samples(buffer_info, nSamples, rgwSamples, last_read=True)
 
 					# packet_received_bit toggled; stop sampling
 					dwf.FDwfDigitalInConfigure(self.interface_handler, c_bool(0), c_bool(0))
+
+					curr_DIO = self._get_DIO_values()
+					if (curr_DIO & self.packet_created_bit) != packet_created_pin_state:
+						ack_missed = True
 
 					packet_received = True
 					num_packets_received += 1
@@ -550,7 +572,7 @@ def initialize_network(network_output_channels, network_input_channels, num_pack
 if __name__ == "__main__":
 	### Parse input to initialize variables ###
 	file_input_format_info = "Input file format:\n"
-	file_input_format_info += "[button press mirror channel], [packet creation channel], [packet reception channel]\n"
+	file_input_format_info += "[button press mirror channel], [packet creation channel], [packet reception channel 1] ... [packet reception channel n]\n"
 	file_input_format_info += "[button press channel]\n"
 	file_input_format_info += "[number of packets to send]\n"
 	file_input_format_info += "[sampling frequency]\n\n"

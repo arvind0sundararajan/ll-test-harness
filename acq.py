@@ -323,6 +323,7 @@ class AnalogDiscoveryUtils:
 		#note: openmote toggles its pins every packet creation and reception
 
 		while num_tries < self.num_packets_experiment:
+			#print "initialize"
 			# initialize "trash" array to clear all buffer samples before starting button press
 			# this must be able to hold 4096 samples, 2 bytes each
 			trashSamples = (c_uint16 * 4096)()
@@ -388,6 +389,7 @@ class AnalogDiscoveryUtils:
 				curr_csamples = buffer_info[0]
 				if curr_csamples == prev_csamples:
 					print "broke early"
+					print buffer_info
 					num_tries -= 1
 					broke_early = True
 
@@ -405,8 +407,9 @@ class AnalogDiscoveryUtils:
 					dwf.FDwfDigitalInConfigure(self.interface_handler, c_bool(0), c_bool(0))
 
 					curr_DIO = self._get_DIO_values()
-					if (curr_DIO & self.packet_created_bit) != packet_created_pin_state:
-						ack_missed = True
+					if not self.one_to_many:
+						if (curr_DIO & self.packet_created_bit) != packet_created_pin_state:
+							ack_missed = True
 
 					packet_received = True
 					num_packets_received += 1
