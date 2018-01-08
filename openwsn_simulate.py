@@ -39,7 +39,8 @@ if __name__ == "__main__":
 
 	print("Missed packets: {}".format(missed_packets))
 	print("Max latency: {}".format(max(latencies)))
-	bins = range(0, num_retries * slotframe_slots * slot_ms, 10)
+	bins = range(0, 100, 10)
+	plt.figure("Figure 11")
 	plt.hist(latencies, bins=bins)
 	plt.show(block=True)
 
