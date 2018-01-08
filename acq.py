@@ -18,6 +18,7 @@ from ctypes import *
 from dwfconstants import *
 import sys
 import time
+import random
 
 dwf = None
 # list of networks
@@ -326,6 +327,8 @@ class AnalogDiscoveryUtils:
 			#print "initialize"
 			# initialize "trash" array to clear all buffer samples before starting button press
 			# this must be able to hold 4096 samples, 2 bytes each
+			wait = random.randrange(0, 500)
+			time.sleep(wait * 0.001)
 			trashSamples = (c_uint16 * 4096)()
 
 			#clear buffer
