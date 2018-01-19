@@ -327,7 +327,7 @@ class AnalogDiscoveryUtils:
 			#print "initialize"
 			# initialize "trash" array to clear all buffer samples before starting button press
 			# this must be able to hold 4096 samples, 2 bytes each
-			wait = random.randrange(0, 500)
+			wait = random.randint(0, 110)
 			time.sleep(wait * 0.001)
 			trashSamples = (c_uint16 * 4096)()
 
