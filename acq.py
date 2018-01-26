@@ -16,9 +16,11 @@
 
 from ctypes import *
 from dwfconstants import *
+import errno
 import sys
 import time
 import random
+import os
 
 dwf = None
 # list of networks
@@ -268,7 +270,7 @@ class AnalogDiscoveryUtils:
 		buffer_info = [cSamples, buffer_info[1] + cLost.value, buffer_info[2] + cCorrupted.value]
 		return buffer_info
 
-	def run(self):
+	def run(self, experiment_directory):
 		"""The main function of the experiment.
 		Our test harness consists of two parts:
 			-digital output to trigger openmote pin. the output rising edge is 1 ms after the reception is high
@@ -286,7 +288,7 @@ class AnalogDiscoveryUtils:
 		run_start_timestamp = time.clock()
 		experiment_start_time = time.strftime("%H_%M_%S_%m_%d_%Y", time.localtime())
 		print "starting dataset at {}\n".format(experiment_start_time)
-		data_file = "raw_data/data_" + experiment_start_time + ".csv"
+		data_file = experiment_directory + "/data_" + experiment_start_time + ".csv"
 		with open(data_file, 'a') as f:
 			f.write("Packet, Sample offset, Latency (ms), Sample\n")
 
@@ -580,6 +582,9 @@ def initialize_network(network_output_channels, network_input_channels, num_pack
 
 if __name__ == "__main__":
 	### Parse input to initialize variables ###
+
+	#TODO: use argparse/optparse to make this nice
+
 	file_input_format_info = "Input file format:\n"
 	file_input_format_info += "[button press mirror channel], [packet creation channel], [packet reception channel 1] ... [packet reception channel n]\n"
 	file_input_format_info += "[button press channel]\n"
@@ -608,6 +613,24 @@ if __name__ == "__main__":
 	dwf.FDwfGetVersion(version)
 	print "DWF Version: " + version.value
 
+
+	# experiment bookkeeping 
+	experiment_name = input("Enter a one-string title for this experiment: ")
+	exp_dir = 'data/' + experiment_name
+	experiment_comments = input("Comments/notes: ")
+
+	try:
+		os.makedirs(exp_dir)
+	except OSError as e:
+		if e.errno != errno.EEXIST:
+			raise 
+
+	#write experiment comments to textfile in folder
+	with open(exp_dir + '/notes.txt', 'a') as comments_file:
+		comments_file.write(experiment_comments)
+
+
+
 	initialize_network(params[0], params[1], params[2][0])
 
 	sampling_freq_user_input = params[3][0]
@@ -617,7 +640,7 @@ if __name__ == "__main__":
 	try:
 		for network in list_of_networks:
 			ad_utils.add_network(network)
-			ad_utils.run()
+			ad_utils.run(exp_dir)
 			#ad_utils.test()
 	except KeyboardInterrupt:
 		dwf.FDwfDigitalIOReset(ad_utils.interface_handler)
@@ -625,4 +648,7 @@ if __name__ == "__main__":
 		sys.exit(1)
 
 	ad_utils.close_device()
+
+
+
 	sys.exit(0)
