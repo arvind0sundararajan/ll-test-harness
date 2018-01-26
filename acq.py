@@ -284,6 +284,8 @@ class AnalogDiscoveryUtils:
 			(Python): write these samples to file
 			(Python): increment number of packets sent
 			repeat above steps until number of packets sent = number of packets in experiment
+
+		Returns the path to the data file (csv)
 		"""
 		run_start_timestamp = time.clock()
 		experiment_start_time = time.strftime("%H_%M_%S_%m_%d_%Y", time.localtime())
@@ -450,7 +452,7 @@ class AnalogDiscoveryUtils:
 		print "Number of received packets: {}".format(num_packets_received)
 		print "Number of missed packets: {}\n".format(num_packets_missed)
 		print "Total duration: {} seconds".format(run_end_timestamp - run_start_timestamp)
-		return
+		return data_file
 
 	def postprocess(self, attempt_number, buffer_info, data, data_file, missed_packet=False):
 		"""Only write a sample to the data file if any of the DIO bits change.
@@ -615,9 +617,9 @@ if __name__ == "__main__":
 
 
 	# experiment bookkeeping 
-	experiment_name = input("Enter a one-string title for this experiment: ")
+	experiment_name = raw_input("Enter a one-string title for this experiment: ")
 	exp_dir = 'data/' + experiment_name
-	experiment_comments = input("Comments/notes: ")
+	experiment_comments = raw_input("Comments/notes: ")
 
 	try:
 		os.makedirs(exp_dir)
@@ -640,7 +642,7 @@ if __name__ == "__main__":
 	try:
 		for network in list_of_networks:
 			ad_utils.add_network(network)
-			ad_utils.run(exp_dir)
+			experiment_datafile = ad_utils.run(exp_dir)
 			#ad_utils.test()
 	except KeyboardInterrupt:
 		dwf.FDwfDigitalIOReset(ad_utils.interface_handler)
@@ -649,6 +651,7 @@ if __name__ == "__main__":
 
 	ad_utils.close_device()
 
-
+	process_data_command = 'python process_data.py ' + experiment_datafile + ' ' + exp_dir + '/' + experiment_name
+	os.system(process_data_command)
 
 	sys.exit(0)
