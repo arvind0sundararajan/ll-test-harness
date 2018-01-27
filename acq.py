@@ -535,8 +535,9 @@ class Exp:
 	Opens connection with AD2, runs main test harness loop, closes, writes data to file.
 	"""
 
-	def __init__(self):
-		pass
+	def __init__(self, parameters):
+		self.parameters = parameters
+	
 
 
 
