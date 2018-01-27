@@ -17,6 +17,7 @@
 from ctypes import *
 from dwfconstants import *
 import errno
+import logging
 import sys
 import time
 import random
@@ -35,6 +36,7 @@ class Network:
 		self.output_channels = output_channels
 		self.input_channels = input_channels
 		self.num_packets = num_packets_to_send
+
 
 class AnalogDiscoveryUtils:
 
@@ -527,6 +529,17 @@ class AnalogDiscoveryUtils:
 			[self._get_DIO_values(print_vals=True) for j in range(10)]
 		return
 
+
+class Exp:
+	"""Called by main. Holds all experiment bookkeeping and logging information.
+	Opens connection with AD2, runs main test harness loop, closes, writes data to file.
+	"""
+
+	def __init__(self):
+		pass
+
+
+
 def get_bit(num, position):
 	"""Get the bit located at [position] in [num]
 	"""
@@ -587,22 +600,29 @@ if __name__ == "__main__":
 
 	#TODO: use argparse/optparse to make this nice
 
+	"""
 	file_input_format_info = "Input file format:\n"
 	file_input_format_info += "[button press mirror channel], [packet creation channel], [packet reception channel 1] ... [packet reception channel n]\n"
 	file_input_format_info += "[button press channel]\n"
 	file_input_format_info += "[number of packets to send]\n"
 	file_input_format_info += "[sampling frequency]\n\n"
+	"""
 
 	assert len(sys.argv) == 2
-	input_file = sys.argv[1]
 
-	with open(input_file) as file:
+	### set up parameters to feed into experiment
+	experiment_parameter_input_file = sys.argv[1]
+
+	with open(experiment_parameter_input_file) as file:
 		params = file.readlines()
 	#remove whitespace characters in each line
 	params = [x.strip() for x in params]
 	#convert string of comma separated ints to list of ints
 	params = [[int(i) for i in line.split(", ")] for line in params]
+	###
 
+
+	### set up dwf library to interface with AD2
 	if sys.platform.startswith("win"):
 		dwf = cdll.dwf
 	elif sys.platform.startswith("darwin"):
@@ -614,6 +634,7 @@ if __name__ == "__main__":
 	version = create_string_buffer(16)
 	dwf.FDwfGetVersion(version)
 	print "DWF Version: " + version.value
+	###
 
 
 	# experiment bookkeeping 
