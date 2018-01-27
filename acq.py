@@ -8,7 +8,7 @@
 		3. Number of packets in each network
 
 	Output:
-		1. Records data to [FILENAME].csv
+		1. Records data to a folder with name=experiment title.
 
 	Written by Alex Yang and Arvind Sundararajan
 	10/26/2017.
