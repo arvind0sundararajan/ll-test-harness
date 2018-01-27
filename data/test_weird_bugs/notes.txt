@@ -1,0 +1,3 @@
+In the previous experiment, the test harness "crashed" and kept registering failed packets. I'm now running this to see if the test harness fails again after restarting (but the openmotes have not been reset/reprogrammed).
+
+Update: didn't work. I think this rules out the possibility that there is an unexpected loop in the test harness, because restarting it would have reset that loop. (Although it is still worth triple checking the test harness)
