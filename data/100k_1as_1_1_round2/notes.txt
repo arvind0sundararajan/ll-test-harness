@@ -1,0 +1,1 @@
+rebuilt openmotes. hopefully test harness registers sent/received packets. perhaps there's an issue with a) the jumpers having a loose connection, or b) openmote pins changing behavior after some time?

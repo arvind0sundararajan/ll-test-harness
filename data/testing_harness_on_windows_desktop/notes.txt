@@ -1,0 +1,1 @@
+first time setting up openwsn-ll and ll-test-harness on the desktop
