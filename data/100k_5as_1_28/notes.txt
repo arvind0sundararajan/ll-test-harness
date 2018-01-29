@@ -1,0 +1,3 @@
+Running 100k packets, 5 active slot network to see if comb structure persists.
+
+Failed after 42772 packets. Missed the 42772nd ack, then missed every subsequent packet.
