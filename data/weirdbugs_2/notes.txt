@@ -1,0 +1,1 @@
+Reset and reprogrammed motes. Will see if test harness registers sent/received signals.
