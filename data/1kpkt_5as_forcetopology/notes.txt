@@ -1,0 +1,2 @@
+I realized that in all 100k runs, we did not explicit set forcetopology=1. Would this have had any effect? It could have; none of the connections in topology.c would have been set. Instead, the destination address in llatency.c would have caused the appropriate rx mote to receive the packet.
+This is a 1k packet run with forcetopology=1.
