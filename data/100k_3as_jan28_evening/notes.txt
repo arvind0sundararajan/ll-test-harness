@@ -1,0 +1,1 @@
+Previous 100k run for 5 active slots failed. The motes were reset and rebuilt for 3 active slots.
