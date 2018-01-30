@@ -1,0 +1,2 @@
+1k packets, 5 active slots, 0 retries, 1-1
+909/1000
