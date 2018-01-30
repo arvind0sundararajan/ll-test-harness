@@ -1,0 +1,2 @@
+1k packets\n3 active slots\nno retries (for raw pdr)
+842/1000
