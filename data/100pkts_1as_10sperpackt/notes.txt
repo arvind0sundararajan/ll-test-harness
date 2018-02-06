@@ -1,0 +1,1 @@
+Extended the test harness wait time from 1.5 seconds to 10 seconds.

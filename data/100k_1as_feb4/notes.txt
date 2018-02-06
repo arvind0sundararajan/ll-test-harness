@@ -1,0 +1,1 @@
+Forced topology. Changed wait time between packets to 10 seconds - initial idea was that this would reduce the number of dropped packets, potentially due to backoff.

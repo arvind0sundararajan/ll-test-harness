@@ -1,0 +1,1 @@
+Motes keep desynchronizing/timing outmotes keep desynchronizing, which crashes the test harness. trying again with 100k packets
