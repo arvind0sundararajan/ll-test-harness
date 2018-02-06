@@ -34,7 +34,7 @@ def write_missed_packet_samples(output_data_file, missed_packets_samples):
 
 def parse_data(input_data_file):
 	"""Parses data in the format
-	packet #, sample offset, latency (ms), (sample)
+	packet #, sample offset, latency (ms), (sample), ack_missed
 	save the last sample offset of every file.
 
 	Returns an array where the first element is an array of all missed packet samples, 
@@ -67,7 +67,7 @@ def parse_data(input_data_file):
 
 			#strip newline characters
 			line = line.strip()
-			# break up string into array of four strings
+			# break up string into array of strings
 			line = line.split(", ")
 
 			if index == 1:
