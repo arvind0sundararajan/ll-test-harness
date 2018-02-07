@@ -17,6 +17,7 @@
 from ctypes import *
 from dwfconstants import *
 import errno
+import logging
 import sys
 import time
 import random
@@ -35,6 +36,7 @@ class Network:
 		self.output_channels = output_channels
 		self.input_channels = input_channels
 		self.num_packets = num_packets_to_send
+
 
 class AnalogDiscoveryUtils:
 
@@ -292,7 +294,7 @@ class AnalogDiscoveryUtils:
 		print "starting dataset at {}\n".format(experiment_start_time)
 		data_file = experiment_directory + "/data_" + experiment_start_time + ".csv"
 		with open(data_file, 'a') as f:
-			f.write("Packet, Sample offset, Latency (ms), Sample\n")
+			f.write("Packet, Sample offset, Latency (ms), Sample, ack_missed=1\n")
 
 		##### EXPERIMENT SETUP #####
 		# sample for a max of 1.5 seconds
@@ -354,10 +356,6 @@ class AnalogDiscoveryUtils:
 			#print "begin acquisition {}".format(num_tries + 1)
 			prev_csamples, curr_csamples = 0, 0
 
-			if ack_missed and not self.one_to_many:
-				print "missed ack"
-				time.sleep(0.55)
-
 
 			# inner loop: runs from button press until packet received.
 			while buffer_info[0] < nSamples:
@@ -417,11 +415,11 @@ class AnalogDiscoveryUtils:
 					if not self.one_to_many:
 						if (curr_DIO & self.packet_created_bit) != packet_created_pin_state:
 							ack_missed = True
+							print("missed ack")
 
 					packet_received = True
 					num_packets_received += 1
 					#print "received packet {}".format(num_tries)
-
 					break
 
 				prev_csamples = curr_csamples
@@ -435,13 +433,13 @@ class AnalogDiscoveryUtils:
 
 			# reach here if packet was received OR if 1.5 million samples have been taken
 			if packet_received == True:
-				self.postprocess(num_tries, buffer_info, rgwSamples, data_file)
+				self.postprocess(num_tries, ack_missed, buffer_info, rgwSamples, data_file)
 
 			else:
 				# we took 1.5 million samples and supposedly missed the packet
 				num_packets_missed += 1
 				packet_number_missed.append(num_tries)
-				self.postprocess(num_tries, buffer_info, rgwSamples, data_file, missed_packet=True)
+				self.postprocess(num_tries, ack_missed, buffer_info, rgwSamples, data_file, missed_packet=True)
 				# set last_packet_handled to True to try button press again
 
 
@@ -454,7 +452,7 @@ class AnalogDiscoveryUtils:
 		print "Total duration: {} seconds".format(run_end_timestamp - run_start_timestamp)
 		return data_file
 
-	def postprocess(self, attempt_number, buffer_info, data, data_file, missed_packet=False):
+	def postprocess(self, attempt_number, ack_missed, buffer_info, data, data_file, missed_packet=False):
 		"""Only write a sample to the data file if any of the DIO bits change.
 		
 		The data saved is an integer with ith bit = 1 if ith channel was high, bit = 0 if channel was low
@@ -494,7 +492,13 @@ class AnalogDiscoveryUtils:
 					sample_output_str = binary_num_str(sample, split=True)
 					#print sample_output_str
 					latency = index * self.period_ms
-					f.write("{}, {}, {}, {}\n".format(attempt_number, index, latency, sample_output_str))
+					pkt_ack_missed_code = 0
+
+					if ack_missed:
+						pkt_ack_missed_code = 1
+
+
+					f.write("{}, {}, {}, {}, {}\n".format(attempt_number, index, latency, sample_output_str, pkt_ack_missed_code))
 
 				index += 1
 				prev_sample = sample
@@ -526,6 +530,18 @@ class AnalogDiscoveryUtils:
 			dwf.FDwfDigitalIOOutputSet(self.interface_handler, output)
 			[self._get_DIO_values(print_vals=True) for j in range(10)]
 		return
+
+
+class Exp:
+	"""Called by main. Holds all experiment bookkeeping and logging information.
+	Opens connection with AD2, runs main test harness loop, closes, writes data to file.
+	"""
+
+	def __init__(self, parameters):
+		self.parameters = parameters
+	
+
+
 
 def get_bit(num, position):
 	"""Get the bit located at [position] in [num]
@@ -587,22 +603,29 @@ if __name__ == "__main__":
 
 	#TODO: use argparse/optparse to make this nice
 
+	"""
 	file_input_format_info = "Input file format:\n"
 	file_input_format_info += "[button press mirror channel], [packet creation channel], [packet reception channel 1] ... [packet reception channel n]\n"
 	file_input_format_info += "[button press channel]\n"
 	file_input_format_info += "[number of packets to send]\n"
 	file_input_format_info += "[sampling frequency]\n\n"
+	"""
 
 	assert len(sys.argv) == 2
-	input_file = sys.argv[1]
 
-	with open(input_file) as file:
+	### set up parameters to feed into experiment
+	experiment_parameter_input_file = sys.argv[1]
+
+	with open(experiment_parameter_input_file) as file:
 		params = file.readlines()
 	#remove whitespace characters in each line
 	params = [x.strip() for x in params]
 	#convert string of comma separated ints to list of ints
 	params = [[int(i) for i in line.split(", ")] for line in params]
+	###
 
+
+	### set up dwf library to interface with AD2
 	if sys.platform.startswith("win"):
 		dwf = cdll.dwf
 	elif sys.platform.startswith("darwin"):
@@ -614,6 +637,7 @@ if __name__ == "__main__":
 	version = create_string_buffer(16)
 	dwf.FDwfGetVersion(version)
 	print "DWF Version: " + version.value
+	###
 
 
 	# experiment bookkeeping 
@@ -651,7 +675,7 @@ if __name__ == "__main__":
 
 	ad_utils.close_device()
 
-	process_data_command = 'python process_data.py ' + experiment_datafile + ' ' + exp_dir + '/' + experiment_name
-	os.system(process_data_command)
+	#process_data_command = 'python process_data.py ' + experiment_datafile + ' ' + exp_dir + '/' + experiment_name
+	#os.system(process_data_command)
 
 	sys.exit(0)
