@@ -1,0 +1,1 @@
+Motes were all reset when I returned this morning. Test harness data seems to show a string of missed packets. Most apps were closed on the computer; maybe there was a schedule restart/shut down :(. Rerunning 100k packets, 1as, 5 retries, forced topology.
