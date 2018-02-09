@@ -223,7 +223,7 @@ class AnalogDiscoveryUtils:
 		dwf.FDwfDigitalInTriggerPositionSet(self.interface_handler, c_int(num_samples))
 		# set trigger source to AD2 DigitalIn channels
 		dwf.FDwfDigitalInTriggerSourceSet(self.interface_handler, trigsrcDetectorDigitalIn)
-		# set DigitalIn trigger when trigger_channel_bit_rep is high
+		# set DigitalIn trigger on rising edge of trigger_channel_bit_rep
 		dwf.FDwfDigitalInTriggerSet(self.interface_handler, c_int(0), c_int(0), c_int(trigger_channel_bit_rep), c_int(0))
 
 		# start acquisition; should wait for trigger
@@ -304,6 +304,9 @@ class AnalogDiscoveryUtils:
 		#csamples, lost, corrupted
 		buffer_info = [0, 0, 0]
 
+		# num_packets_received + num_packets_missed must equal num_tries
+		num_tries = 0
+
 		num_packets_received = 0
 		num_packets_missed = 0
 		num_acks_missed = 0
@@ -311,15 +314,11 @@ class AnalogDiscoveryUtils:
 		# array to hold indices of packets missed
 		packet_number_missed = []
 
-		# num_packets_received + num_packets_missed must equal num_tries
-		num_tries = 0
-
 		# ready for next button press if previous packet has been handled
 		# and if instruments, variables are configured for next packet
 		last_packet_handled = True
 		# keep track of if current packet has been received
 		packet_received = True
-
 		#keep track of previous packet acknowledgment
 		ack_missed = False
 
@@ -386,13 +385,16 @@ class AnalogDiscoveryUtils:
 					num_tries += 1
 
 				# copy buffer samples to memory and flush
-				#print "Before: {}".format(buffer_info)
 				buffer_info = self._copy_buffer_samples(buffer_info, nSamples, rgwSamples)
-				#print "After: {}".format(buffer_info)
-				#buffer_flush_stop = time.clock()
 
 				curr_csamples = buffer_info[0]
+
+				# no new samples taken for some reason
+				### THIS BLOCK IS A WORKAROUND THAT WAS IMPLEMENTED TO HANDLE CASES WHERE NO NEW SAMPLES ARE TAKEN BETWEEN SUCCESSIVE READS
+				### THIS MIGHT NOT ACTUALLY BE NECESSARY 
+				"""
 				if curr_csamples == prev_csamples:
+					
 					print "broke early"
 					print buffer_info
 					num_tries -= 1
@@ -401,6 +403,7 @@ class AnalogDiscoveryUtils:
 					# stop sampling
 					dwf.FDwfDigitalInConfigure(self.interface_handler, c_bool(0), c_bool(0))
 					break
+				"""
 
 				# manually stop sampling once packet_received_bit is not equal to its pin state
 				curr_DIO = self._get_DIO_values()
@@ -428,8 +431,11 @@ class AnalogDiscoveryUtils:
 			#set this so we can push button again
 			last_packet_handled = True
 
+			### THIS IS AN EXTENSION OF THE ABOVE UNCOMMENTED BLOCK
+			"""
 			if broke_early:
 				continue
+			"""
 
 			# reach here if packet was received OR if 1.5 million samples have been taken
 			if packet_received == True:
@@ -474,22 +480,25 @@ class AnalogDiscoveryUtils:
 			index, prev_sample, latency = 0, 0, 0
 			for sample in data:
 				if (index > buffer_info[0]):
-					# we want to check every sample if test harness thinks packet was missed
+					#we are past the end of the array; have traversed more samples than were taken
+
+
+					### NOT SURE WHY THIS WAS IMPLEMENTED
+					""" 
 					if latency == 4.096:
 						print "only took 4096 samples?"
+					"""
 					break
 
 				if ((prev_sample ^ sample) != 0):
-					# if sample is zero something wrong happened when reading from the buffer
+					#this block is entered if the sample has changed in any bits
+
 
 				#if ((prev_sample ^ sample) & self.bits_to_monitor) != 0:
 					# one or more of the bits to monitor have changed
 
-					#TODO: add check to see if sample is weird. every output bit other than button press must always be high.
-					#sample_output_str = str(get_bit(sample, self.packet_received_pos))
-					#sample_output_str += str(get_bit(sample, self.packet_created_pos))
-					#sample_output_str += str(get_bit(sample,  self.button_press_mirror_pos))
 					sample_output_str = binary_num_str(sample, split=True)
+
 					#print sample_output_str
 					latency = index * self.period_ms
 					pkt_ack_missed_code = 0
@@ -675,7 +684,7 @@ if __name__ == "__main__":
 
 	ad_utils.close_device()
 
-	#process_data_command = 'python process_data.py ' + experiment_datafile + ' ' + exp_dir + '/' + experiment_name
-	#os.system(process_data_command)
+	process_data_command = 'python process_data.py ' + experiment_datafile + ' ' + exp_dir + '/' + experiment_name
+	os.system(process_data_command)
 
 	sys.exit(0)
