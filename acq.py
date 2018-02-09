@@ -224,7 +224,7 @@ class AnalogDiscoveryUtils:
 		# set trigger source to AD2 DigitalIn channels
 		dwf.FDwfDigitalInTriggerSourceSet(self.interface_handler, trigsrcDetectorDigitalIn)
 		# set DigitalIn trigger when trigger_channel_bit_rep is high
-		dwf.FDwfDigitalInTriggerSet(self.interface_handler, c_int(0), c_int(trigger_channel_bit_rep), c_int(0), c_int(0))
+		dwf.FDwfDigitalInTriggerSet(self.interface_handler, c_int(0), c_int(0), c_int(trigger_channel_bit_rep), c_int(0))
 
 		# start acquisition; should wait for trigger
 		dwf.FDwfDigitalInConfigure(self.interface_handler, c_bool(0), c_bool(1))
