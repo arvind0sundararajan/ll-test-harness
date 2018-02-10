@@ -24,10 +24,10 @@ class Experiment:
 
 	def __init__(self, button_press_channel, button_press_mirror_channel, packet_created_channel, packet_received_channel):
 		self.ad2 = AnalogDiscoveryUtils()
-		self.button_press_channel = (1<<button_press_channel)
-		self.button_press_mirror_channel = (1<<button_press_mirror_channel)
-		self.packet_created_channel = (1<<packet_created_channel)
-		self.packet_received_channel = (1<<packet_received_channel)
+		self.button_press_bit_mask = (1<<button_press_channel)
+		self.button_press_mirror_bit_mask = (1<<button_press_mirror_channel)
+		self.packet_created_bit_mask = (1<<packet_created_channel)
+		self.packet_received_bit_mask = (1<<packet_received_channel)
 
 		self.packet_latencies = []
 
@@ -49,8 +49,8 @@ class Experiment:
 		"""Postprocesses the array of samples to return the latency of this packet.
 		Corresponds to the first sample offset which shows a difference in the packet received channel.
 		"""
-		print 'Postprocessing.'
-		packet_received_initial_state = array_of_samples[0] & self.packet_received_channel
+		#print 'Postprocessing.'
+		packet_received_initial_state = steady_state_DIO & self.packet_received_bit_mask
 		
 		# sample offset
 		i = 0
@@ -63,7 +63,7 @@ class Experiment:
 
 		for sample in array_of_samples:
 			i += 1
-			if (sample & self.packet_received_channel) != packet_received_initial_state:
+			if (sample & self.packet_received_bit_mask) != packet_received_initial_state:
 				#block is first entered for first sample offset where pin changed state
 				latency = (i / 2.0)
 				packet_received = True
@@ -95,40 +95,44 @@ class Experiment:
 			sts = c_byte()
 			rgwSamples = (c_uint16*self.ad2.cSamples)()
 
-
 			packet_received = False
+
+			self.ad2.configure_digitalIO(self.button_press_bit_mask)
+			self.ad2.configure_digitalIn(self.button_press_mirror_bit_mask)
 
 			#get initial state of DIO pins
 			steady_state_DIO = self.ad2.get_DIO_values()
-			print "steady_state_DIO: {}".format(binary_num_str(steady_state_DIO))
+			#print "steady_state_DIO: {}".format(binary_num_str(steady_state_DIO))
 
-			self.ad2.configure_digitalIO(self.button_press_channel)
-			self.ad2.configure_digitalIn(self.button_press_mirror_channel)
+			#delay button press so digitalIn is armed
+			# button uniformly distributed over 110ms slotframe
+			wait = random.randint(0, 110) + 5
+			time.sleep(wait * 0.001)
+
 
 			#press button
-			self.ad2.button_press(self.button_press_channel)
+			self.ad2.button_press(self.button_press_bit_mask)
 
 			while True:
 				self.ad2.dwf.FDwfDigitalInStatus(self.ad2.interface_handler, c_int(1), byref(sts))
-				print "STS VAL: " + str(sts.value)
+				#print "STS VAL: " + str(sts.value)
 				if sts.value == stsDone.value:
-					print "Done sampling."
+					#print "Done sampling."
 					break
 
 				curr_DIO_values = self.ad2.get_DIO_values()
 				#print "curr_DIO_values: {}".format(binary_num_str(curr_DIO_values))
-				if (((curr_DIO_values ^ steady_state_DIO) & self.packet_received_channel) != 0) and not packet_received:
-					print "curr_DIO_values: {}".format(binary_num_str(curr_DIO_values))
+				if (((curr_DIO_values ^ steady_state_DIO) & self.packet_received_bit_mask) != 0) and not packet_received:
+					#print "curr_DIO_values: {}".format(binary_num_str(curr_DIO_values))
 					# packet received      	
-					print "Pkt received"
+					#print "Pkt received"
 					packet_received = True
 					self.ad2.button_depress()
 
-				time.sleep(1)
 					
 			self.ad2.read_buffer(rgwSamples)
 			curr_latency = self.postprocess(rgwSamples, steady_state_DIO)
-			print "{}: {}".format(i, curr_latency)
+			print "{}: {}".format(i+1, curr_latency)
 
 
 		self.ad2.close_device()
@@ -192,6 +196,7 @@ class AnalogDiscoveryUtils:
 	def close_device(self):
 		#close device 
 		self.dwf.FDwfDeviceCloseAll()
+		print "Device closed"
 
 
 	def configure_digitalIn(self, button_press_mirror_channel):
@@ -205,30 +210,38 @@ class AnalogDiscoveryUtils:
 		self.dwf.FDwfDigitalInBufferSizeSet(self.interface_handler, c_int(self.cSamples))
 
 
-		print "Setting trigger: {}".format(binary_num_str(button_press_mirror_channel))
+		#print "Setting trigger: {}".format(binary_num_str(button_press_mirror_channel))
 
-		self.dwf.FDwfDigitalInTriggerSourceSet(self.interface_handler, c_ubyte(3)) # trigsrcDetectorDigitalIn
+
 		self.dwf.FDwfDigitalInTriggerPositionSet(self.interface_handler, c_int(self.cSamples))
+		self.dwf.FDwfDigitalInTriggerSourceSet(self.interface_handler, c_ubyte(3)) # trigsrcDetectorDigitalIn
 		self.dwf.FDwfDigitalInTriggerSet(self.interface_handler, c_int(0), c_int(0), c_int(button_press_mirror_channel), c_int(0)) # DIO8 rising
 
 		# begin acquisition
 		self.dwf.FDwfDigitalInConfigure(self.interface_handler, c_bool(0), c_bool(1))
-		print "Configured DigitalIn."
+		#print "Configured DigitalIn."
 		return
-		
+
+
+	def get_digitalIn_status(self):
+		"""Returns the status of the DigitalIn module.
+		"""
+		sts = c_byte()
+		return 0
+
 
 	def configure_digitalIO(self, output_bit_mask):
 		# reset DigitalIO instrument
 		self.dwf.FDwfDigitalIOReset()
 
 		# enable output/mask 
-		print "Enabling output: {}".format(binary_num_str(output_bit_mask))
-		self.dwf.FDwfDigitalIOOutputEnableSet(self.interface_handler, c_uint16(output_bit_mask)) 
+		#print "Enabling output: {}".format(binary_num_str(output_bit_mask))
+		self.dwf.FDwfDigitalIOOutputEnableSet(self.interface_handler, c_int(output_bit_mask)) 
 		return		
 
 
 	def button_press(self, button_press_channel):
-		print "button pressed"
+		#print "button pressed"
 		# set value on enabled IO pins
 		self.dwf.FDwfDigitalIOOutputSet(self.interface_handler, c_uint16(button_press_channel)) 
 		return
@@ -242,7 +255,7 @@ class AnalogDiscoveryUtils:
 
 
 	def read_buffer(self, array_to_write):
-		print "Reading buffer contents."
+		#print "Reading buffer contents."
 		sts = c_byte()
 		self.dwf.FDwfDigitalInStatus(self.interface_handler, c_int(1), byref(sts))
 
@@ -287,7 +300,7 @@ if __name__ == '__main__':
 	my_experiment = Experiment(0, 8, 7, 15)
 
 	try:
-		my_experiment.run(5)
+		my_experiment.run(100)
 
 	except KeyboardInterrupt:
 		my_experiment.ad2.close_device()
