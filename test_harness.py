@@ -155,7 +155,7 @@ class AnalogDiscoveryUtils:
 		self.interface_handler = None
 
 		# set number of sample to acquire (DEPENDING ON NUMBER OF ACTIVE SLOTS)
-		self.cSamples = 4096
+		self.cSamples = 700
 
 		self._setup_dwf_library()
 
@@ -300,7 +300,7 @@ if __name__ == '__main__':
 	my_experiment = Experiment(0, 8, 7, 15)
 
 	try:
-		my_experiment.run(100)
+		my_experiment.run(10000)
 
 	except KeyboardInterrupt:
 		my_experiment.ad2.close_device()
