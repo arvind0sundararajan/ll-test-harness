@@ -155,7 +155,7 @@ class AnalogDiscoveryUtils:
 		self.interface_handler = None
 
 		# set number of sample to acquire (DEPENDING ON NUMBER OF ACTIVE SLOTS)
-		self.cSamples = 700
+		self.cSamples = 400
 
 		self._setup_dwf_library()
 
