@@ -26,7 +26,7 @@ class Experiment:
 	def __init__(self, button_press_channel, button_press_mirror_channel, packet_created_channel, packet_received_channel,packet_received_channel_2,killswitch_channel):
 		self.ad2 = AnalogDiscoveryUtils()
 		self.button_press_bit_mask = (1<<button_press_channel)
-		self.button_press_mirror_bit_mask = (1<<button_press_mirror_channel)
+		self.button_press_mirror_bit_mask = (1<<button_press_mirror_channel) | (1<<(button_press_mirror_channel+1))
 		self.packet_created_bit_mask = (1<<packet_created_channel)
 		self.packet_received_bit_mask = (1<<packet_received_channel) | (1<<packet_received_channel_2)
         	self.packet_received_channel_1 = (1<<packet_received_channel) 
