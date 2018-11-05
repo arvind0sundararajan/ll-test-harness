@@ -182,7 +182,7 @@ class Experiment:
 			self.ad2.configure_digitalIn(self.button_press_mirror_bit_mask,sample_divider)
 
 
-			#print "steady_state_DIO: {}".format(binary_num_str(steady_state_DIO))
+			print "steady_state_DIO: {}".format(binary_num_str(steady_state_DIO))
 
 			#delay button press so digitalIn is armed
 			# button uniformly distributed over 110ms slotframe
@@ -196,7 +196,7 @@ class Experiment:
 			steady_state_DIO = self.ad2.get_DIO_values()
 			#press button
 			self.ad2.button_press(self.button_press_bit_mask)
-            		#print "button pressed"
+            print "button pressed"
 
 
 			while True:
